@@ -1,0 +1,13 @@
+# Arquivos de teste do ambiente
+info.php
+testar.php
+
+# Compactados e temporários
+*.zip
+*.log
+
+# Editores e sistema
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
