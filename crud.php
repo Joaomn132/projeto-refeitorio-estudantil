@@ -13,9 +13,23 @@ $cfg = $TABELAS[$t];
 $pk = $cfg['pk'];
 $campos = $cfg['campos'];
 $acao = $_GET['a'] ?? 'listar';
+$busca = trim((string)($_GET['q'] ?? $_POST['q'] ?? ''));
+$pag = isset($_GET['pag']) && ctype_digit((string)$_GET['pag']) ? max(1, (int)$_GET['pag']) : 1;
 $msg = null;
 $valoresForm = [];
 $idForm = $_GET['id'] ?? '';
+
+function url_crud($t, $q = '', $pag = 1)
+{
+    $params = ['t' => $t];
+    if ($q !== '') {
+        $params['q'] = $q;
+    }
+    if ($pag > 1) {
+        $params['pag'] = $pag;
+    }
+    return 'crud.php?' . http_build_query($params);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $op = $_POST['op'] ?? '';
@@ -26,7 +40,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $st->bind_param('s', $id);
             $st->execute();
             flash('ok', 'Registro excluído com sucesso.');
-            header('Location: crud.php?t=' . urlencode($t));
+            header('Location: ' . url_crud($t, $busca, $pag));
+            exit;
+        }
+
+        if ($op === 'status_pagamento' && $t === 'pagamento') {
+            $id = $_POST['id'] ?? '';
+            $novoStatus = $_POST['novo_status'] ?? '';
+            if (in_array($novoStatus, ['CONFIRMADO', 'CANCELADO'], true)) {
+                $st = $conn->prepare("UPDATE pagamento SET status = ? WHERE id_pagamento = ?");
+                $st->bind_param('ss', $novoStatus, $id);
+                $st->execute();
+                flash('ok', $novoStatus === 'CONFIRMADO' ? 'Pagamento confirmado com sucesso.' : 'Pagamento cancelado.');
+            }
+            header('Location: ' . url_crud($t, $busca, $pag));
             exit;
         }
 
@@ -58,11 +85,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sql = "UPDATE `$t` SET " . implode(', ', $sets) . " WHERE `$pk` = ?";
                 $params[] = $id;
             }
-            $st = $conn->prepare($sql);
-            $st->bind_param(str_repeat('s', count($params)), ...$params);
-            $st->execute();
 
-            flash('ok', $id === '' ? 'Registro incluído com sucesso.' : 'Registro alterado com sucesso.');
+            // Alinhado ao relacionamento 1:1 (ALUNO POSSUI CONTA): cria a conta ao cadastrar novo aluno
+            $criouConta = false;
+            if ($id === '' && $t === 'aluno') {
+                $conn->begin_transaction();
+                try {
+                    $st = $conn->prepare($sql);
+                    $st->bind_param(str_repeat('s', count($params)), ...$params);
+                    $st->execute();
+
+                    $novoAlunoId = (int)$conn->insert_id;
+                    $stConta = $conn->prepare("INSERT INTO conta (id_aluno, status) VALUES (?, 'ATIVA')");
+                    $stConta->bind_param('i', $novoAlunoId);
+                    $stConta->execute();
+
+                    $conn->commit();
+                    $criouConta = true;
+                } catch (Throwable $e) {
+                    $conn->rollback();
+                    throw $e;
+                }
+            } else {
+                $st = $conn->prepare($sql);
+                $st->bind_param(str_repeat('s', count($params)), ...$params);
+                $st->execute();
+            }
+
+            flash('ok', $id === ''
+                ? ($criouConta ? 'Aluno incluído e conta criada automaticamente.' : 'Registro incluído com sucesso.')
+                : 'Registro alterado com sucesso.');
             header('Location: crud.php?t=' . urlencode($t));
             exit;
         }
@@ -154,19 +206,64 @@ if ($acao === 'novo' || $acao === 'editar'):
 </div>
 
 <?php else:
-    $res = $conn->query("SELECT * FROM `$t` ORDER BY `$pk`");
+    if ($t === 'conta') {
+        $sqlLista = "SELECT c.*, s.saldo FROM conta c LEFT JOIN vw_saldo s ON s.id_conta = c.id_conta ORDER BY c.id_conta";
+    } else {
+        $sqlLista = "SELECT * FROM `$t` ORDER BY `$pk`";
+    }
+    $linhas = $conn->query($sqlLista)->fetch_all(MYSQLI_ASSOC);
+
+    if ($busca !== '') {
+        $linhas = array_values(array_filter($linhas, function ($linha) use ($pk, $campos, $opcoes, $busca, $t) {
+            if (mb_stripos((string)$linha[$pk], $busca) !== false) {
+                return true;
+            }
+            foreach ($campos as $nome => $c) {
+                $texto = (string)formatar($c, $linha[$nome], $opcoes[$nome] ?? []);
+                if (mb_stripos($texto, $busca) !== false) {
+                    return true;
+                }
+            }
+            if ($t === 'conta' && $linha['saldo'] !== null && mb_stripos(reais($linha['saldo']), $busca) !== false) {
+                return true;
+            }
+            return false;
+        }));
+    }
+
+    $totalRegistros = count($linhas);
+    $porPagina = 15;
+    $totalPaginas = max(1, (int)ceil($totalRegistros / $porPagina));
+    if ($pag > $totalPaginas) {
+        $pag = $totalPaginas;
+    }
+    $offset = ($pag - 1) * $porPagina;
+    $linhasPagina = array_slice($linhas, $offset, $porPagina);
+    $colSpan = count($campos) + 2 + ($t === 'conta' ? 1 : 0);
 ?>
 <div class="card">
     <h2><?= h($cfg['titulo']) ?></h2>
-    <p><a class="btn" href="crud.php?t=<?= h($t) ?>&a=novo">+ Incluir <?= h($cfg['singular']) ?></a></p>
+    <div class="barra-crud">
+        <a class="btn" href="crud.php?t=<?= h($t) ?>&a=novo">+ Incluir <?= h($cfg['singular']) ?></a>
+        <form method="get" action="crud.php" class="busca-crud">
+            <input type="hidden" name="t" value="<?= h($t) ?>">
+            <input type="text" name="q" value="<?= h($busca) ?>" placeholder="Filtrar <?= h(mb_strtolower($cfg['titulo'])) ?>..." aria-label="Filtrar registros">
+            <button class="btn sec" type="submit">Filtrar</button>
+            <?php if ($busca !== ''): ?>
+                <a class="btn sec" href="crud.php?t=<?= h($t) ?>">Limpar</a>
+            <?php endif; ?>
+        </form>
+    </div>
+
     <div class="tabela-wrap">
     <table>
         <tr>
             <th>ID</th>
             <?php foreach ($campos as $c): ?><th><?= h($c['rotulo']) ?></th><?php endforeach; ?>
+            <?php if ($t === 'conta'): ?><th>Saldo</th><?php endif; ?>
             <th>Ações</th>
         </tr>
-        <?php $vazio = true; while ($linha = $res->fetch_assoc()): $vazio = false; ?>
+        <?php foreach ($linhasPagina as $linha): ?>
             <tr>
                 <td><?= h($linha[$pk]) ?></td>
                 <?php foreach ($campos as $nome => $c): ?>
@@ -176,9 +273,32 @@ if ($acao === 'novo' || $acao === 'editar'):
                         <td><?= h(formatar($c, $linha[$nome], $opcoes[$nome] ?? [])) ?></td>
                     <?php endif; ?>
                 <?php endforeach; ?>
+                <?php if ($t === 'conta'):
+                    $s = $linha['saldo']; ?>
+                    <td class="<?= $s === null ? '' : ($s < 0 ? 'valor-neg' : 'valor-pos') ?>">
+                        <?= $s === null ? '—' : h(reais($s)) ?>
+                    </td>
+                <?php endif; ?>
                 <td class="acoes">
+                    <?php if ($t === 'pagamento' && $linha['status'] === 'PENDENTE'): ?>
+                        <form class="inline" method="post" action="<?= h(url_crud($t, $busca, $pag)) ?>">
+                            <input type="hidden" name="op" value="status_pagamento">
+                            <input type="hidden" name="t" value="<?= h($t) ?>">
+                            <input type="hidden" name="id" value="<?= h($linha[$pk]) ?>">
+                            <input type="hidden" name="novo_status" value="CONFIRMADO">
+                            <button class="btn peq ok" type="submit">Confirmar</button>
+                        </form>
+                        <form class="inline" method="post" action="<?= h(url_crud($t, $busca, $pag)) ?>"
+                              onsubmit="return confirm('Cancelar este pagamento?');">
+                            <input type="hidden" name="op" value="status_pagamento">
+                            <input type="hidden" name="t" value="<?= h($t) ?>">
+                            <input type="hidden" name="id" value="<?= h($linha[$pk]) ?>">
+                            <input type="hidden" name="novo_status" value="CANCELADO">
+                            <button class="btn peq perigo" type="submit">Cancelar</button>
+                        </form>
+                    <?php endif; ?>
                     <a class="btn peq" href="crud.php?t=<?= h($t) ?>&a=editar&id=<?= h($linha[$pk]) ?>">Alterar</a>
-                    <form class="inline" method="post" action="crud.php?t=<?= h($t) ?>"
+                    <form class="inline" method="post" action="<?= h(url_crud($t, $busca, $pag)) ?>"
                           onsubmit="return confirm('Excluir este registro?');">
                         <input type="hidden" name="op" value="excluir">
                         <input type="hidden" name="t" value="<?= h($t) ?>">
@@ -187,12 +307,32 @@ if ($acao === 'novo' || $acao === 'editar'):
                     </form>
                 </td>
             </tr>
-        <?php endwhile; ?>
-        <?php if ($vazio): ?>
-            <tr><td colspan="<?= count($campos) + 2 ?>">Nenhum registro cadastrado.</td></tr>
+        <?php endforeach; ?>
+        <?php if (!$linhasPagina): ?>
+            <tr><td colspan="<?= $colSpan ?>"><?= $busca !== '' ? 'Nenhum registro encontrado para "' . h($busca) . '".' : 'Nenhum registro cadastrado.' ?></td></tr>
         <?php endif; ?>
     </table>
     </div>
+
+    <?php if ($totalRegistros > 0): ?>
+        <div class="paginacao">
+            <span>
+                Mostrando <?= $offset + 1 ?>&ndash;<?= min($offset + $porPagina, $totalRegistros) ?> de <?= $totalRegistros ?>
+                <?= $busca !== '' ? 'resultado(s) filtrado(s)' : 'registro(s)' ?>
+            </span>
+            <?php if ($totalPaginas > 1): ?>
+                <div class="paginacao-botoes">
+                    <?php if ($pag > 1): ?>
+                        <a class="btn sec peq" href="<?= h(url_crud($t, $busca, $pag - 1)) ?>">&larr; Anterior</a>
+                    <?php endif; ?>
+                    <span>Página <?= $pag ?> de <?= $totalPaginas ?></span>
+                    <?php if ($pag < $totalPaginas): ?>
+                        <a class="btn sec peq" href="<?= h(url_crud($t, $busca, $pag + 1)) ?>">Próxima &rarr;</a>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
 </div>
 <?php endif; ?>
 

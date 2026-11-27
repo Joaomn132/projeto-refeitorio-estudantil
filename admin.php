@@ -1,8 +1,26 @@
 <?php
-// Painel administrativo: métricas + atalhos de gerenciamento.
+// Painel administrativo: métricas, pagamentos pendentes e atalhos de gerenciamento.
 require 'config.php';
 exigir_admin();
 $titulo = 'Métricas';
+
+// Ação rápida para confirmar ou cancelar pagamento pendente
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['op'] ?? '') === 'status_pagamento') {
+    $idPag = isset($_POST['id']) && ctype_digit((string)$_POST['id']) ? (int)$_POST['id'] : 0;
+    $novoStatus = $_POST['novo_status'] ?? '';
+    if ($idPag && in_array($novoStatus, ['CONFIRMADO', 'CANCELADO'], true)) {
+        try {
+            $st = $conn->prepare("UPDATE pagamento SET status = ? WHERE id_pagamento = ?");
+            $st->bind_param('si', $novoStatus, $idPag);
+            $st->execute();
+            flash('ok', $novoStatus === 'CONFIRMADO' ? 'Pagamento confirmado com sucesso.' : 'Pagamento cancelado.');
+        } catch (mysqli_sql_exception $e) {
+            flash('erro', mensagem_erro($e));
+        }
+    }
+    header('Location: admin.php');
+    exit;
+}
 
 // ---- Métricas gerais ----
 $totAlunos   = (int)escalar($conn, "SELECT COUNT(*) FROM aluno");
@@ -13,6 +31,18 @@ $arrecadado  = (float)escalar($conn, "SELECT IFNULL(SUM(valor),0) FROM pagamento
 $pendentes   = (int)escalar($conn, "SELECT COUNT(*) FROM pagamento WHERE status='PENDENTE'");
 $saldoTotal  = (float)escalar($conn, "SELECT IFNULL(SUM(saldo),0) FROM vw_saldo");
 $debitado    = (float)escalar($conn, "SELECT IFNULL(SUM(valor_debitado),0) FROM acesso");
+
+$pagPendentes = [];
+if ($pendentes > 0) {
+    $pagPendentes = $conn->query(
+        "SELECT p.id_pagamento, p.valor, p.data_hora, p.forma_pagamento, a.matricula, a.nome
+           FROM pagamento p
+           JOIN conta c ON c.id_conta = p.id_conta
+           JOIN aluno a ON a.id_aluno = c.id_aluno
+          WHERE p.status = 'PENDENTE'
+          ORDER BY p.data_hora, p.id_pagamento"
+    )->fetch_all(MYSQLI_ASSOC);
+}
 
 $metricas = [
     ['Alunos cadastrados',    number_format($totAlunos, 0, ',', '.'), ''],
@@ -50,9 +80,52 @@ require 'header.php';
     </div>
 </div>
 
+<?php if ($pagPendentes): ?>
+<div class="card">
+    <div class="card-topo">
+        <h2>Pagamentos pendentes</h2>
+        <span class="card-sub">Confirmação rápida de créditos</span>
+    </div>
+    <div class="tabela-wrap">
+        <table>
+            <tr><th>ID</th><th>Matrícula</th><th>Estudante</th><th>Data e hora</th><th>Forma</th><th>Valor</th><th>Ações</th></tr>
+            <?php foreach ($pagPendentes as $p): ?>
+                <tr>
+                    <td><?= (int)$p['id_pagamento'] ?></td>
+                    <td><?= h($p['matricula']) ?></td>
+                    <td><?= h($p['nome']) ?></td>
+                    <td><?= h(date('d/m/Y H:i', strtotime($p['data_hora']))) ?></td>
+                    <td><?= h($p['forma_pagamento']) ?></td>
+                    <td><?= h(reais($p['valor'])) ?></td>
+                    <td class="acoes">
+                        <form class="inline" method="post" action="admin.php">
+                            <input type="hidden" name="op" value="status_pagamento">
+                            <input type="hidden" name="id" value="<?= (int)$p['id_pagamento'] ?>">
+                            <input type="hidden" name="novo_status" value="CONFIRMADO">
+                            <button class="btn peq ok" type="submit">Confirmar</button>
+                        </form>
+                        <form class="inline" method="post" action="admin.php" onsubmit="return confirm('Cancelar este pagamento?');">
+                            <input type="hidden" name="op" value="status_pagamento">
+                            <input type="hidden" name="id" value="<?= (int)$p['id_pagamento'] ?>">
+                            <input type="hidden" name="novo_status" value="CANCELADO">
+                            <button class="btn peq perigo" type="submit">Cancelar</button>
+                        </form>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+        </table>
+    </div>
+</div>
+<?php endif; ?>
+
 <div class="card">
     <h2>Gerenciar dados</h2>
     <div class="grade">
+        <a href="catraca.php">
+            <div class="icone" aria-hidden="true"><svg <?= $sv ?>><rect x='3' y='4' width='18' height='16' rx='2'/><path d='M7 12h10'/><path d='M13 8l4 4-4 4'/></svg></div>
+            <strong>Catraca</strong>
+            <span class="rotulo">Registrar acesso</span>
+        </a>
     <?php foreach ($TABELAS as $nome => $cfg):
         $total = $conn->query("SELECT COUNT(*) AS n FROM `$nome`")->fetch_assoc()['n']; ?>
         <a href="crud.php?t=<?= h($nome) ?>">
