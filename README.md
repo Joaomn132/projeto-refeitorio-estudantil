@@ -3,7 +3,7 @@
 Trabalho prático de Banco de Dados I e Laboratório de Banco de Dados I (CEFET-MG, 2º semestre de 2026).
 Sistema web em PHP com MySQL para controlar o acesso, os pagamentos e as refeições de um refeitório estudantil.
 
-**Integrantes:** (preencher com os nomes do grupo)
+**Integrantes:** Carlos Corlaite, Gabriel Carvalho, Gabriel Lucas e João Antônio.
 
 ## Estrutura
 
