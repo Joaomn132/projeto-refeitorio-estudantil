@@ -18,6 +18,37 @@ function flash($tipo, $texto)
     $_SESSION['flash'] = [$tipo, $texto];
 }
 
+// ===== Autenticação do administrador (projeto acadêmico) =====
+const ADMIN_USUARIO = 'admin';
+const ADMIN_SENHA   = 'admin';
+
+function admin_logado(): bool
+{
+    return !empty($_SESSION['admin']);
+}
+
+function exigir_admin(): void
+{
+    if (!admin_logado()) {
+        header('Location: login.php');
+        exit;
+    }
+}
+
+// Executa um SELECT que devolve um único valor (contagens, somas...).
+function escalar($conn, $sql, $padrao = 0)
+{
+    $res = $conn->query($sql);
+    $linha = $res ? $res->fetch_row() : null;
+    return $linha ? $linha[0] : $padrao;
+}
+
+// Formata um número como moeda em real.
+function reais($v): string
+{
+    return 'R$ ' . number_format((float)$v, 2, ',', '.');
+}
+
 function mensagem_erro(mysqli_sql_exception $e)
 {
     $c = (int)$e->getCode();
@@ -51,6 +82,20 @@ function carregar_opcoes($conn, $campo)
         $opcoes[$r['id']] = $r['rotulo'];
     }
     return $opcoes;
+}
+
+// Renderiza um status como "badge" colorido (HTML seguro: o texto é escapado).
+function badge_status($valor)
+{
+    $v = strtoupper(trim((string)$valor));
+    $bons   = ['ATIVA', 'CONFIRMADO', 'ATIVO'];
+    $ruins  = ['BLOQUEADA', 'INATIVA', 'CANCELADO', 'INATIVO'];
+    $espera = ['PENDENTE'];
+    if (in_array($v, $bons, true))        $classe = 'ok';
+    elseif (in_array($v, $ruins, true))   $classe = 'mau';
+    elseif (in_array($v, $espera, true))  $classe = 'esp';
+    else                                  $classe = 'neu';
+    return '<span class="badge ' . $classe . '">' . h($valor) . '</span>';
 }
 
 function formatar($campo, $valor, $opcoes)

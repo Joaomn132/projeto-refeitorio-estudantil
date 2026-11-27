@@ -2,6 +2,7 @@
 // CRUD genérico: serve as 6 tabelas, a partir da descrição em config.php.
 // Uso: crud.php?t=aluno  (listar) | &a=novo | &a=editar&id=3
 require 'config.php';
+exigir_admin();
 
 $t = $_GET['t'] ?? $_POST['t'] ?? '';
 if (!isset($TABELAS[$t])) {
@@ -169,7 +170,11 @@ if ($acao === 'novo' || $acao === 'editar'):
             <tr>
                 <td><?= h($linha[$pk]) ?></td>
                 <?php foreach ($campos as $nome => $c): ?>
-                    <td><?= h(formatar($c, $linha[$nome], $opcoes[$nome] ?? [])) ?></td>
+                    <?php if ($c['tipo'] === 'select' && strtolower($c['rotulo']) === 'status' && $linha[$nome] !== null): ?>
+                        <td><?= badge_status($linha[$nome]) ?></td>
+                    <?php else: ?>
+                        <td><?= h(formatar($c, $linha[$nome], $opcoes[$nome] ?? [])) ?></td>
+                    <?php endif; ?>
                 <?php endforeach; ?>
                 <td class="acoes">
                     <a class="btn peq" href="crud.php?t=<?= h($t) ?>&a=editar&id=<?= h($linha[$pk]) ?>">Alterar</a>

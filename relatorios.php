@@ -1,6 +1,7 @@
 <?php
 // Relatórios de consulta: cada um mostra o SQL usado e o resultado.
 require 'config.php';
+exigir_admin();
 $titulo = 'Relatórios';
 
 function relatorio($conn, $n, $titulo, $descricao, $sql, $params = [], $tipos = '', $extra = '')
