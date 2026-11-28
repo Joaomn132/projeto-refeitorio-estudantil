@@ -32,7 +32,7 @@ CREATE TABLE carteirinha (
     CONSTRAINT ck_cart_status CHECK (status IN ('ATIVA', 'INATIVA', 'BLOQUEADA'))
 ) ENGINE=InnoDB;
 
--- 3) CONTA (1:1 com ALUNO - relacionamento RECEBE)
+-- 3) CONTA (1:1 com ALUNO - relacionamento POSSUI)
 CREATE TABLE conta (
     id_conta INT AUTO_INCREMENT,
     id_aluno INT         NOT NULL,
