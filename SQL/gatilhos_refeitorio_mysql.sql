@@ -10,6 +10,7 @@ USE refeitorio;
 DROP TRIGGER IF EXISTS trg_acesso_bi;
 DROP TRIGGER IF EXISTS trg_acesso_bu;
 DROP TRIGGER IF EXISTS trg_pagamento_bu;
+DROP TRIGGER IF EXISTS trg_pagamento_bd;
 DROP TRIGGER IF EXISTS trg_carteirinha_bi;
 DROP TRIGGER IF EXISTS trg_refeicao_bu;
 
@@ -57,6 +58,18 @@ BEGIN
             SET MESSAGE_TEXT = 'Acesso negado: a conta está bloqueada.';
     END IF;
 
+    -- Garante no máximo 1 acesso por aluno em cada refeição (mesmo após troca de carteirinha)
+    IF EXISTS (
+        SELECT 1
+          FROM acesso a
+          JOIN carteirinha ct ON ct.id_carteirinha = a.id_carteirinha
+         WHERE ct.id_aluno = v_id_aluno
+           AND a.id_refeicao = NEW.id_refeicao
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Acesso negado: este aluno já registrou acesso nesta refeição.';
+    END IF;
+
     SELECT preco INTO v_preco
       FROM refeicao
      WHERE id_refeicao = NEW.id_refeicao;
@@ -88,22 +101,33 @@ BEGIN
 END$$
 
 -- 3) PAGAMENTO (antes de atualizar): pagamento confirmado não pode ser
---    alterado nem voltar a pendente; cancelado não pode ser reativado;
---    cancelar um crédito não pode deixar o saldo negativo.
+--    alterado nem voltar a pendente; cancelado não pode ser reativado nem
+--    alterado; cancelar um crédito não pode deixar o saldo negativo.
 CREATE TRIGGER trg_pagamento_bu
 BEFORE UPDATE ON pagamento
 FOR EACH ROW
 BEGIN
     DECLARE v_saldo DECIMAL(10,2);
 
-    IF OLD.status = 'CANCELADO' AND NEW.status <> 'CANCELADO' THEN
-        SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Um pagamento cancelado não pode ser reativado.';
+    IF OLD.status = 'CANCELADO' THEN
+        IF NEW.status <> 'CANCELADO' THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Um pagamento cancelado não pode ser reativado.';
+        END IF;
+        IF NEW.valor <> OLD.valor
+           OR NEW.id_conta <> OLD.id_conta
+           OR NEW.data_hora <> OLD.data_hora
+           OR NEW.forma_pagamento <> OLD.forma_pagamento THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Um pagamento cancelado não pode ser alterado.';
+        END IF;
     END IF;
 
     IF OLD.status = 'CONFIRMADO'
        AND (NEW.valor <> OLD.valor
             OR NEW.id_conta <> OLD.id_conta
+            OR NEW.data_hora <> OLD.data_hora
+            OR NEW.forma_pagamento <> OLD.forma_pagamento
             OR NEW.status = 'PENDENTE') THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Um pagamento confirmado não pode ser alterado.';
@@ -121,18 +145,38 @@ BEGIN
     END IF;
 END$$
 
--- 4) CARTEIRINHA (antes de inserir): não se emite carteirinha já vencida.
+-- 4) PAGAMENTO (antes de excluir): excluir um pagamento confirmado não pode
+--    deixar o saldo da conta negativo.
+CREATE TRIGGER trg_pagamento_bd
+BEFORE DELETE ON pagamento
+FOR EACH ROW
+BEGIN
+    DECLARE v_saldo DECIMAL(10,2);
+
+    IF OLD.status = 'CONFIRMADO' THEN
+        SELECT saldo INTO v_saldo
+          FROM vw_saldo
+         WHERE id_conta = OLD.id_conta;
+
+        IF v_saldo - OLD.valor < 0 THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Exclusão negada: o saldo da conta ficaria negativo.';
+        END IF;
+    END IF;
+END$$
+
+-- 5) CARTEIRINHA (antes de inserir): só se cadastra carteirinha com validade futura.
 CREATE TRIGGER trg_carteirinha_bi
 BEFORE INSERT ON carteirinha
 FOR EACH ROW
 BEGIN
-    IF NEW.validade < CURDATE() THEN
+    IF NEW.validade <= CURDATE() THEN
         SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = 'Não é possível cadastrar uma carteirinha com validade no passado.';
+            SET MESSAGE_TEXT = 'Não é possível cadastrar uma carteirinha sem validade futura.';
     END IF;
 END$$
 
--- 5) REFEICAO (antes de atualizar): o preço não muda depois que a
+-- 6) REFEICAO (antes de atualizar): o preço não muda depois que a
 --    refeição já teve acessos registrados.
 CREATE TRIGGER trg_refeicao_bu
 BEFORE UPDATE ON refeicao

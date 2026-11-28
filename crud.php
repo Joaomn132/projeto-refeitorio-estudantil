@@ -150,7 +150,7 @@ if ($acao === 'editar' && !$valoresForm) {
     foreach ($campos as $nome => $c) {
         $v = $linha[$nome];
         if ($c['tipo'] === 'datetime' && $v !== null) {
-            $v = str_replace(' ', 'T', substr($v, 0, 16));
+            $v = str_replace(' ', 'T', substr($v, 0, 19));
         }
         $valoresForm[$nome] = $v;
     }
@@ -191,7 +191,7 @@ if ($acao === 'novo' || $acao === 'editar'):
             <?php elseif ($c['tipo'] === 'date'): ?>
                 <input id="<?= h($nome) ?>" name="<?= h($nome) ?>" type="date" value="<?= h($v) ?>" <?= $req ?>>
             <?php elseif ($c['tipo'] === 'datetime'): ?>
-                <input id="<?= h($nome) ?>" name="<?= h($nome) ?>" type="datetime-local" step="60" value="<?= h($v) ?>" <?= $req ?>>
+                <input id="<?= h($nome) ?>" name="<?= h($nome) ?>" type="datetime-local" step="1" value="<?= h($v) ?>" <?= $req ?>>
             <?php else: ?>
                 <input id="<?= h($nome) ?>" name="<?= h($nome) ?>" type="<?= $c['tipo'] === 'email' ? 'email' : 'text' ?>"
                        maxlength="<?= (int)($c['max'] ?? 100) ?>" value="<?= h($v) ?>" <?= $req ?>>
