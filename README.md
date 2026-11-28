@@ -30,12 +30,12 @@ Sistema web em PHP com MySQL para controlar o acesso, os pagamentos e as refeiç
 ## Como rodar
 
 1. Instale o [XAMPP](https://www.apachefriends.org/) (Apache, PHP e MySQL) e inicie o Apache e o MySQL.
-2. Copie este projeto para `C:\xampp\htdocs\refeitorio\`.
+2. Copie ou clone este projeto dentro de `C:\xampp\htdocs\` (por exemplo, `C:\xampp\htdocs\refeitorio\`).
 3. No phpMyAdmin (`localhost/phpmyadmin`), importe, nesta ordem:
    1. `SQL/ddl_refeitorio_v2_mysql.sql`
    2. `SQL/gatilhos_refeitorio_mysql.sql`
    3. `SQL/povoamento_refeitorio_mysql.sql`
-4. Abra `localhost/refeitorio/`.
+4. Abra `localhost/nome-da-pasta-do-projeto/` no navegador (por exemplo, `localhost/refeitorio/` se a pasta se chamar `refeitorio`).
 
 A conexão usa o usuário `root` sem senha (padrão do XAMPP). Se o seu MySQL tiver outra configuração, ajuste o `conexao.php`.
 
